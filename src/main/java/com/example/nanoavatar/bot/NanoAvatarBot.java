@@ -7,10 +7,11 @@ import com.example.nanoavatar.filters.FilterRegistry;
 import com.example.nanoavatar.payment.PaymentService;
 import com.example.nanoavatar.user.SessionState;
 import com.example.nanoavatar.user.UserService;
+import org.telegram.telegrambots.meta.api.objects.InputFile;
 import com.example.nanoavatar.user.UserSession;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.ParseMode;
-import org.telegram.telegrambots.meta.api.methods.GetFile;                    // <-- ВАЖНО
+import org.telegram.telegrambots.meta.api.methods.GetFile;                    // <-- важно
 import org.telegram.telegrambots.meta.api.methods.send.SendInvoice;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
@@ -21,7 +22,6 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.*;
 
@@ -445,7 +445,7 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         String fileId = largest.getFileId();
 
         // получаем путь файла у Telegram и строим публичный URL
-        GetFile getFileMethod = new GetFile();          // <-- вот тут фикc
+        GetFile getFileMethod = new GetFile();
         getFileMethod.setFileId(fileId);
         org.telegram.telegrambots.meta.api.objects.File tgFile = execute(getFileMethod);
         String filePath = tgFile.getFilePath();
@@ -460,12 +460,14 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         userService.changeBalance(chatId, -promptPriceCredits, "SPEND", filter.getId());
 
         try {
-            byte[] resultBytes = geminiClient.generateImage(prompt, fileUrl);
+            // теперь GeminiClient возвращает URL сгенерированного изображения
+            String imageUrl = geminiClient.generateImage(prompt, fileUrl);
 
             SendPhoto sendPhoto = new SendPhoto();
-            sendPhoto.setChatId(chatId);
+            sendPhoto.setChatId(String.valueOf(chatId));
             sendPhoto.setCaption("✨ Готово! Фильтр: " + filter.getTitle());
-            sendPhoto.setPhoto(new InputFile(new ByteArrayInputStream(resultBytes), "result.jpg"));
+// Telegram сам скачает картинку по URL, но оборачиваем в InputFile
+            sendPhoto.setPhoto(new InputFile(imageUrl));
             sendPhoto.setReplyMarkup(buildBackOnlyKeyboard());
 
             execute(sendPhoto);
