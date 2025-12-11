@@ -56,10 +56,10 @@ public class GeminiClient {
     );
 
     public GeminiClient(String baseUrl, String agentId, String apiKey, String model) {
-        // В доках базовый URL вида: https://api.timeweb.cloud
+        // Для OpenAI‑совместимого API в примерах используется https://agent.timeweb.cloud
         // Мы ожидаем именно ДОМЕН, без хвоста /api/v1/...
         if (baseUrl == null || baseUrl.isBlank()) {
-            this.baseUrl = "https://api.timeweb.cloud";
+            this.baseUrl = "https://agent.timeweb.cloud";
         } else {
             String tmp = baseUrl.trim();
             if (tmp.endsWith("/")) tmp = tmp.substring(0, tmp.length() - 1);
@@ -79,9 +79,9 @@ public class GeminiClient {
      *  - sourceImageUrl   — публичный URL исходного фото (из Telegram).
      *
      * На выход:
-     *  - прямая ссылка на сгенерированную картинку (String).
+     *  - байты PNG/JPG сгенерированного изображения (для отправки в Telegram).
      */
-    public String generateImage(String filterPrompt, String sourceImageUrl) throws IOException {
+    public byte[] generateImage(String filterPrompt, String sourceImageUrl) throws IOException {
         if (agentId == null || agentId.isBlank()) {
             throw new IllegalStateException("TIMEWEB_AGENT_ID is not configured");
         }
@@ -152,9 +152,27 @@ public class GeminiClient {
                 throw new IOException("Gemini API response doesn't contain image URL. Content: " + content);
             }
 
-            // ⚠️ ВАЖНО: здесь мы БОЛЬШЕ НИЧЕГО НЕ СКАЧИВАЕМ
-            // Просто возвращаем URL, а дальше его скачивает уже Telegram.
-            return imageUrl;
+            System.out.println("Gemini returned image URL: " + imageUrl); // лог на всякий случай
+
+            // ⚠️ ВАЖНО: теперь мы не отдаём этот URL в Telegram.
+            // Скачиваем картинку сами и возвращаем её байты.
+            Request downloadReq = new Request.Builder()
+                    .url(imageUrl)
+                    .get()
+                    .build();
+
+            try (Response downloadResp = client.newCall(downloadReq).execute()) {
+                if (downloadResp.body() == null || !downloadResp.isSuccessful()) {
+                    String errBody = downloadResp.body() != null ? downloadResp.body().string() : "";
+                    throw new IOException(
+                            "Failed to download image from URL: " + imageUrl +
+                                    ". HTTP " + downloadResp.code() +
+                                    " Body: " + errBody
+                    );
+                }
+
+                return downloadResp.body().bytes();
+            }
         }
     }
 

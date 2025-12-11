@@ -21,6 +21,7 @@ import org.telegram.telegrambots.meta.api.objects.payments.PreCheckoutQuery;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import java.io.ByteArrayInputStream;
 
 import java.io.IOException;
 import java.util.*;
@@ -460,16 +461,16 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         userService.changeBalance(chatId, -promptPriceCredits, "SPEND", filter.getId());
 
         try {
-            // теперь GeminiClient возвращает URL сгенерированного изображения
-            String imageUrl = geminiClient.generateImage(prompt, fileUrl);
-
-            System.out.println("Gemini returned image URL: " + imageUrl); // лог на всякий случай
+            // теперь GeminiClient возвращает байты сгенерированного изображения
+            byte[] imageBytes = geminiClient.generateImage(prompt, fileUrl);
 
             SendPhoto sendPhoto = new SendPhoto();
             sendPhoto.setChatId(String.valueOf(chatId));
             sendPhoto.setCaption("✨ Готово! Фильтр: " + filter.getTitle());
-            // Telegram сам скачает картинку по URL, оборачиваем в InputFile
-            sendPhoto.setPhoto(new InputFile(imageUrl));
+
+            // Отправляем как загруженный файл, а не как URL — Telegram больше никуда сам не ходит
+            InputFile photoFile = new InputFile(new ByteArrayInputStream(imageBytes), "avatar.png");
+            sendPhoto.setPhoto(photoFile);
             sendPhoto.setReplyMarkup(buildBackOnlyKeyboard());
 
             execute(sendPhoto);
@@ -486,12 +487,9 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                 e2.printStackTrace();
             }
         }
-
-        session.setState(SessionState.BROWSING);
-        session.setSelectedFilterId(null);
     }
 
-    private String buildPromptForFilter(FilterNode filter, String userCaption) {
+        private String buildPromptForFilter(FilterNode filter, String userCaption) {
         StringBuilder sb = new StringBuilder();
         sb.append("Apply the following creative style to the user's portrait photo: ");
         sb.append(filter.getPromptPart());
