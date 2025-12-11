@@ -13,24 +13,31 @@ import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
 public class App {
 
     public static void main(String[] args) throws Exception {
-        Dotenv dotenv = Dotenv.load();
+        Dotenv dotenv = null;
+        try {
+            dotenv = Dotenv.configure()
+                    .ignoreIfMissing()
+                    .load();
+        } catch (Exception ignored) {
+        }
 
-        String token = dotenv.get("BOT_TOKEN");
-        String username = dotenv.get("BOT_USERNAME");
-        String dbPath = dotenv.get("DATABASE_PATH", "bot.db");
+        String token = requireEnv(dotenv, "BOT_TOKEN");
+        String username = requireEnv(dotenv, "BOT_USERNAME");
 
-        String providerToken = dotenv.get("YOOKASSA_PROVIDER_TOKEN");
-        int minTopup = Integer.parseInt(dotenv.get("MIN_TOPUP_RUB", "100"));
-        int creditsPerRub = Integer.parseInt(dotenv.get("CREDITS_PER_RUBLE", "1"));
-        int promptPrice = Integer.parseInt(dotenv.get("PROMPT_PRICE_CREDITS", "1"));
-        int dailyBonus = Integer.parseInt(dotenv.get("DAILY_BONUS_CREDITS", "1"));
-        String moscowZoneId = dotenv.get("MOSCOW_TIMEZONE", "Europe/Moscow");
+        String dbPath = envOrDotenv(dotenv, "DATABASE_PATH", "bot.db");
+
+        String providerToken = requireEnv(dotenv, "YOOKASSA_PROVIDER_TOKEN");
+        int minTopup = Integer.parseInt(envOrDotenv(dotenv, "MIN_TOPUP_RUB", "100"));
+        int creditsPerRub = Integer.parseInt(envOrDotenv(dotenv, "CREDITS_PER_RUBLE", "1"));
+        int promptPrice = Integer.parseInt(envOrDotenv(dotenv, "PROMPT_PRICE_CREDITS", "1"));
+        int dailyBonus = Integer.parseInt(envOrDotenv(dotenv, "DAILY_BONUS_CREDITS", "1"));
+        String moscowZoneId = envOrDotenv(dotenv, "MOSCOW_TIMEZONE", "Europe/Moscow");
 
         // Timeweb / Gemini
-        String timewebBaseUrl = dotenv.get("TIMEWEB_BASE_URL", "https://agent.timeweb.cloud");
-        String timewebAgentId = dotenv.get("TIMEWEB_AGENT_ID");
-        String geminiApiKey = dotenv.get("GEMINI_API_KEY");
-        String geminiModel = dotenv.get("GEMINI_MODEL", "gemini-2.5-flash");
+        String timewebBaseUrl = envOrDotenv(dotenv, "TIMEWEB_BASE_URL", "https://agent.timeweb.cloud");
+        String timewebAgentId = requireEnv(dotenv, "TIMEWEB_AGENT_ID");
+        String geminiApiKey = requireEnv(dotenv, "GEMINI_API_KEY");
+        String geminiModel = envOrDotenv(dotenv, "GEMINI_MODEL", "gemini-2.5-flash");
 
         Database db = new Database(dbPath);
         UserService userService = new UserService(db);
@@ -46,9 +53,31 @@ public class App {
                 token, username, db, paymentService, geminiClient, promptPrice);
         api.registerBot(bot);
 
-        // ежедневное пополнение
         DailyBonusScheduler scheduler =
                 new DailyBonusScheduler(userService, bot, dailyBonus, moscowZoneId);
         scheduler.start();
+    }
+
+    private static String envOrDotenv(Dotenv dotenv, String key, String defaultValue) {
+        String v = System.getenv(key);
+        if (v != null && !v.isBlank()) return v;
+
+        if (dotenv != null) {
+            String dv = dotenv.get(key);
+            if (dv != null && !dv.isBlank()) return dv;
+        }
+        return defaultValue;
+    }
+
+    private static String requireEnv(Dotenv dotenv, String key) {
+        String v = System.getenv(key);
+        if (v != null && !v.isBlank()) return v;
+
+        if (dotenv != null) {
+            String dv = dotenv.get(key);
+            if (dv != null && !dv.isBlank()) return dv;
+        }
+
+        throw new IllegalStateException("Required environment variable " + key + " is not set");
     }
 }
