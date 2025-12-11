@@ -1,13 +1,12 @@
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:17-jre-jammy
 
 WORKDIR /app
 
-# База будет храниться вне образа
-VOLUME ["/data"]
-
-# копируем jar
+# Копируем собранный fat-jar
 COPY target/nano-avatar-bot-1.0.0-jar-with-dependencies.jar app.jar
-COPY .env .env
+
+# SQLite база будет лежать снаружи
+VOLUME ["/data"]
 
 ENV JAVA_OPTS=""
 
