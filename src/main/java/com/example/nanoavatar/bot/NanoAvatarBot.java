@@ -463,22 +463,28 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
             // теперь GeminiClient возвращает URL сгенерированного изображения
             String imageUrl = geminiClient.generateImage(prompt, fileUrl);
 
+            System.out.println("Gemini returned image URL: " + imageUrl); // лог на всякий случай
+
             SendPhoto sendPhoto = new SendPhoto();
             sendPhoto.setChatId(String.valueOf(chatId));
             sendPhoto.setCaption("✨ Готово! Фильтр: " + filter.getTitle());
-// Telegram сам скачает картинку по URL, но оборачиваем в InputFile
+            // Telegram сам скачает картинку по URL, оборачиваем в InputFile
             sendPhoto.setPhoto(new InputFile(imageUrl));
             sendPhoto.setReplyMarkup(buildBackOnlyKeyboard());
 
             execute(sendPhoto);
-        } catch (IOException | IllegalStateException ex) {
-            // откат
+        } catch (IOException | IllegalStateException | TelegramApiException ex) {
+            // откат кредита
             userService.changeBalance(chatId, promptPriceCredits, "REFUND", "gemini_error");
-            execute(SendMessage.builder()
-                    .chatId(chatId)
-                    .text("⚙️ Не удалось получить картинку от нейросети: " + ex.getMessage() + "\n" +
-                            "Я вернул кредит на твой баланс.")
-                    .build());
+            try {
+                execute(SendMessage.builder()
+                        .chatId(chatId)
+                        .text("⚙️ Не удалось получить картинку от нейросети: " + ex.getMessage() + "\n" +
+                                "Я вернул кредит на твой баланс.")
+                        .build());
+            } catch (TelegramApiException e2) {
+                e2.printStackTrace();
+            }
         }
 
         session.setState(SessionState.BROWSING);

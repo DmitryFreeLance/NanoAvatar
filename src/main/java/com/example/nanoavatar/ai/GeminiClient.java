@@ -203,17 +203,14 @@ public class GeminiClient {
         return contentEl.toString();
     }
 
-    /**
-     * Находим первую ссылку вида https://...
-     */
     private String extractFirstUrl(String text) {
         if (text == null) return null;
-        Pattern pattern = Pattern.compile("(https?://\\S+)");
+
+        // Ищем http/https до первого пробела, кавычек, скобок и т.п.
+        Pattern pattern = Pattern.compile("(https?://[^\\s\"'<>]+)");
         Matcher matcher = pattern.matcher(text);
         if (matcher.find()) {
-            String url = matcher.group(1);
-            // убираем возможную хвостовую пунктуацию
-            return url.replaceAll("[)\\]\\.,!?]*$", "");
+            return matcher.group(1);
         }
         return null;
     }
