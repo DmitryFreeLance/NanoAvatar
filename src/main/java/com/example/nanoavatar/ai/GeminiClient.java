@@ -25,25 +25,33 @@ public class GeminiClient {
     private final OkHttpClient client = new OkHttpClient();
     private final Gson gson = new Gson();
 
+    /**
+     * Системный промпт для агента.
+     * ВАЖНО: он должен быть в целом согласован с тем, что ты написал в панели Timeweb.
+     */
     private static final String SYSTEM_PROMPT = String.join("\n",
-            "Ты — нейросеть Gemini 2.5 Flash, встроенная в Telegram‑бота NanoAvatar.",
-            "Пользователь присылает портретное фото и текстовое описание стиля (фильтра).",
-            "Твоя задача — на основе этого фото создать новый портрет в заданном стиле.",
+            "Ты — визуальный агент на базе Gemini 2.5 Flash для Telegram-бота NanoAvatar.",
             "",
-            "Правила обработки:",
-            "- сохраняй узнаваемость лица и основные пропорции человека;",
-            "- не меняй пол и возраст без явной просьбы в описании;",
-            "- улучшай качество изображения: свет, цвет, резкость, детали;",
-            "- аккуратно добавляй одежду, фон и эффекты, не превращая человека в другого.",
+            "Пользователь присылает портретное фото (селфи или фото по пояс) и текстовое описание стиля (фильтра).",
+            "Бэкенд бота уже подготовил для тебя промпт и ссылку на исходное фото.",
             "",
-            "Безопасность:",
-            "- не создавай NSFW‑контент, жестокость, кровь, политику и прочие спорные темы;",
-            "- изображение должно быть уместно для аватарки и соцсетей.",
+            "Твоя задача:",
+            "1. На основе исходного фото создать новое изображение с сохранением узнаваемости человека.",
+            "2. Применить описанный стиль: одежда, фон, свет, художественные эффекты.",
+            "3. Сделать картинку достаточно реалистичной и аккуратной, пригодной для аватара и соцсетей.",
             "",
-            "Формат ответа:",
+            "Правила:",
+            "- Сохраняй черты лица и пропорции, не превращай пользователя в другого человека.",
+            "- Не меняй пол и возраст без явной просьбы.",
+            "- Улучшай свет, цвет, резкость и детали.",
+            "- Можно добавлять одежду, аксессуары и фон в рамках описанного стиля.",
+            "- Не создавай NSFW, жёсткое насилие, политику и т.п.",
+            "",
+            "Формат ответа ДЛЯ БЭКЕНДА:",
+            "- Используй переданный URL как исходное фото;",
             "- сгенерируй и сохрани итоговое изображение;",
-            "- верни ТОЛЬКО ОДНУ прямую ссылку (https://...) на готовую картинку JPG или PNG;",
-            "- не добавляй текст, Markdown, пояснения или дополнительные данные — только URL."
+            "- верни ТОЛЬКО ОДНУ ПРЯМУЮ ССЫЛКУ (https://...) на готовое изображение JPG или PNG;",
+            "- не возвращай больше никакого текста, Markdown, JSON и т.п. — только URL."
     );
 
     public GeminiClient(String baseUrl, String agentId, String apiKey, String model) {
@@ -55,41 +63,52 @@ public class GeminiClient {
         this.model = model;
     }
 
+    /**
+     * Запрос в OpenAI-совместимый endpoint Timeweb:
+     *   POST /api/v1/cloud-ai/agents/{agent_id}/v1/chat/completions
+     *
+     * ВАЖНО: отправляем только текстовые messages (без image_url),
+     * а URL фото передаём внутри текста.
+     *
+     * @param promptText     текстовый промпт (стиль фильтра + инструкции)
+     * @param sourceImageUrl публичный URL исходного фото (из Telegram)
+     */
     public byte[] generateImage(String promptText, String sourceImageUrl) throws IOException {
         if (agentId == null || agentId.isBlank()) {
             throw new IllegalStateException("TIMEWEB_AGENT_ID is not configured");
         }
 
+        // messages
         JsonArray messages = new JsonArray();
 
+        // system message
         JsonObject systemMsg = new JsonObject();
         systemMsg.addProperty("role", "system");
         systemMsg.addProperty("content", SYSTEM_PROMPT);
         messages.add(systemMsg);
 
+        // user message (просто строка; внутри — и URL фото, и инструкции)
         JsonObject userMsg = new JsonObject();
         userMsg.addProperty("role", "user");
 
-        JsonArray contentArray = new JsonArray();
+        StringBuilder userContent = new StringBuilder();
+        userContent.append("Вот портретное фото пользователя (URL): ")
+                .append(sourceImageUrl)
+                .append("\n\n")
+                .append("Используй это фото как исходное. ")
+                .append("Применяй следующие стилистические инструкции к этому портрету:\n")
+                .append(promptText)
+                .append("\n\n")
+                .append("Сохрани лицо и фигуру узнаваемыми, сделай аккуратный, качественный результат. ")
+                .append("Когда картинка будет готова, верни ТОЛЬКО ПРЯМОЙ URL на готовое изображение.");
 
-        JsonObject textPart = new JsonObject();
-        textPart.addProperty("type", "text");
-        textPart.addProperty("text", promptText);
-        contentArray.add(textPart);
-
-        JsonObject imagePart = new JsonObject();
-        imagePart.addProperty("type", "image_url");
-        JsonObject imageUrlObj = new JsonObject();
-        imageUrlObj.addProperty("url", sourceImageUrl);
-        imagePart.add("image_url", imageUrlObj);
-        contentArray.add(imagePart);
-
-        userMsg.add("content", contentArray);
+        userMsg.addProperty("content", userContent.toString());
         messages.add(userMsg);
 
         JsonObject payload = new JsonObject();
+        // для агента model обычно не обязателен, но если хочешь — можно оставить:
         if (model != null && !model.isBlank()) {
-           payload.addProperty("model", model);
+            payload.addProperty("model", model);
         }
         payload.add("messages", messages);
         payload.addProperty("temperature", 0.9);
@@ -107,12 +126,14 @@ public class GeminiClient {
                 .build();
 
         try (Response response = client.newCall(request).execute()) {
+            String responseBody = response.body() != null ? response.body().string() : "";
+
             if (!response.isSuccessful()) {
+                // Теперь в логах будет понятное сообщение от Timeweb
                 throw new IOException("Gemini API error: HTTP " + response.code() +
-                        " " + response.message());
+                        " Body: " + responseBody);
             }
 
-            String responseBody = response.body() != null ? response.body().string() : "";
             String content = extractMessageContent(responseBody);
             String imageUrl = extractFirstUrl(content);
 
@@ -120,6 +141,7 @@ public class GeminiClient {
                 throw new IOException("No image URL in Gemini response: " + content);
             }
 
+            // Качаем сгенерированную картинку по ссылке
             Request imgReq = new Request.Builder()
                     .url(imageUrl)
                     .get()
@@ -179,6 +201,7 @@ public class GeminiClient {
         Matcher matcher = pattern.matcher(text);
         if (matcher.find()) {
             String url = matcher.group(1);
+            // убираем хвостовую пунктуацию, если есть
             return url.replaceAll("[)\\]\\.,!?]*$", "");
         }
         return null;
