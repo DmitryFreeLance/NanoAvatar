@@ -7,21 +7,17 @@ import com.example.nanoavatar.filters.FilterRegistry;
 import com.example.nanoavatar.payment.PaymentService;
 import com.example.nanoavatar.user.SessionState;
 import com.example.nanoavatar.user.UserService;
-import org.telegram.telegrambots.meta.api.objects.InputFile;
 import com.example.nanoavatar.user.UserSession;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.ParseMode;
-import org.telegram.telegrambots.meta.api.methods.GetFile;                    // <-- важно
 import org.telegram.telegrambots.meta.api.methods.send.SendInvoice;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.*;
 import org.telegram.telegrambots.meta.api.objects.payments.PreCheckoutQuery;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
-import java.io.ByteArrayInputStream;
 
 import java.io.IOException;
 import java.util.*;
@@ -98,12 +94,18 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         UserSession session = getSession(chatId);
 
         if (msg.hasText()) {
-            String text = msg.getText();
+            String text = msg.getText().trim();
 
+            // команды
             if ("/start".equals(text)) {
                 session.setState(SessionState.BROWSING);
                 session.setCurrentNodeId(FilterRegistry.ROOT_ID);
-                sendMainMenu(chatId);
+                sendMainMenu(chatId, session);
+                return;
+            }
+
+            if ("/help".equals(text)) {
+                sendHelp(chatId);
                 return;
             }
 
@@ -111,7 +113,8 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                 int bal = userService.getBalance(chatId);
                 execute(SendMessage.builder()
                         .chatId(chatId)
-                        .text("💰 Твой баланс: " + bal + " кредитов.")
+                        .text("💰 Твой баланс: " + bal + " кредитов.\n" +
+                                "Один ответ бота стоит " + promptPriceCredits + " кредит.")
                         .build());
                 return;
             }
@@ -137,28 +140,44 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                 return;
             }
 
-            // остальной текст
-            execute(SendMessage.builder()
-                    .chatId(chatId)
-                    .text("✏️ Текстовые запросы работают через подпись к фото.\n" +
-                            "Нажми /start, выбери фильтр, отправь фото и при желании добавь описание в подписи.")
-                    .build());
-            return;
-        }
-
-        // фото
-        if (msg.hasPhoto()) {
-            if (session.getState() != SessionState.WAITING_FOR_PHOTO
-                    || session.getSelectedFilterId() == null) {
+            // если это неизвестная команда
+            if (text.startsWith("/")) {
                 execute(SendMessage.builder()
                         .chatId(chatId)
-                        .text("Чтобы применить эффект, сначала выбери фильтр через /start 🙂")
+                        .text("Я знаю команды: /start, /help, /balance, /topup 🙂")
                         .build());
                 return;
             }
 
-            handlePhotoGeneration(msg, session);
+            // обычный текст — это запрос к AI
+            processUserQuery(chatId, session, text);
+            return;
         }
+
+        // другие типы сообщений
+        execute(SendMessage.builder()
+                .chatId(chatId)
+                .text("Пока я работаю только с текстом. Напиши вопрос, задачу или черновик сообщения — я помогу 🙂")
+                .build());
+    }
+
+    private void sendHelp(long chatId) throws TelegramApiException {
+        String text = "🤖 *NanoBuddy* — настраиваемый текстовый ИИ‑ассистент.\n\n" +
+                "Что он умеет:\n" +
+                "• ✏️ Переписывать тексты красиво и без ошибок\n" +
+                "• 📅 Помогать планировать день и разбирать задачи\n" +
+                "• 📚 Объяснять сложные темы простым языком\n" +
+                "• 💡 Придумывать идеи, названия и формулировки\n" +
+                "• 🧩 Разбирать ситуации и предлагать варианты действий\n" +
+                "• 🤝 Поддерживать, когда нужно выговориться\n\n" +
+                "Через /start можно настроить его личность, стиль, юмор, формат ответов и фишки.\n" +
+                "Потом просто пиши текст — и бот отвечает уже в выбранном стиле.";
+
+        execute(SendMessage.builder()
+                .chatId(chatId)
+                .text(text)
+                .parseMode(ParseMode.MARKDOWN)
+                .build());
     }
 
     private void askTopupAmount(long chatId, UserSession session) throws TelegramApiException {
@@ -190,24 +209,25 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
             String nodeId = data.substring("NODE:".length());
             session.setCurrentNodeId(nodeId);
             session.setState(SessionState.BROWSING);
-            showNode(chatId, msgId, registry.getNode(nodeId));
+            showNode(chatId, msgId, registry.getNode(nodeId), session);
         } else if (data.startsWith("BACK:")) {
             String nodeId = data.substring("BACK:".length());
             session.setCurrentNodeId(nodeId);
             session.setState(SessionState.BROWSING);
-            showNode(chatId, msgId, registry.getNode(nodeId));
+            showNode(chatId, msgId, registry.getNode(nodeId), session);
         } else if (data.startsWith("SELECT:")) {
             String id = data.substring("SELECT:".length());
-            session.setSelectedFilterId(id);
-            session.setState(SessionState.WAITING_FOR_PHOTO);
-            askForPhoto(chatId, msgId);
+            toggleOption(session, id);
+            FilterNode node = registry.getNode(id);
+            showNode(chatId, msgId, node, session);
         } else if (data.startsWith("EXAMPLE:")) {
             String id = data.substring("EXAMPLE:".length());
             FilterNode node = registry.getNode(id);
             execute(SendMessage.builder()
                     .chatId(chatId)
-                    .text("🖼 Пример фильтра \"" + node.getTitle() + "\" пока не подключён.\n" +
-                            "Но ты уже можешь попробовать его на своём фото 🙂")
+                    .text("📝 Пример запроса с настройкой \"" + node.getTitle() + "\":\n\n" +
+                            "Например: \"Сделай план на день с учётом моих задач, " +
+                            "используя выбранные мной настройки стиля\".")
                     .build());
         } else if ("BALANCE".equals(data)) {
             session.setState(SessionState.BROWSING);
@@ -226,17 +246,27 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         }
     }
 
+    private void toggleOption(UserSession session, String id) {
+        Set<String> active = session.getActiveOptionIds();
+        if (active.contains(id)) {
+            active.remove(id);
+        } else {
+            active.add(id);
+        }
+    }
+
     // ===== MENUS =====
 
-    private void sendMainMenu(long chatId) throws TelegramApiException {
+    private void sendMainMenu(long chatId, UserSession session) throws TelegramApiException {
         InlineKeyboardMarkup kb = buildKeyboardForRoot();
 
-        String text = "👋 Привет! Я *NanoAvatar* — бот, который делает красивые нейро-образы из твоих фото.\n\n" +
-                "1️⃣ Выбери категорию ниже\n" +
-                "2️⃣ Найди фильтр под настроение\n" +
-                "3️⃣ Нажми «Выбрать фильтр» и отправь фото\n\n" +
-                "Каждая генерация стоит *" + promptPriceCredits + "* кредит. " +
-                "Пополнить баланс можно через кнопку в меню 👇";
+        String text = "👋 Привет! Я *NanoBuddy* — настраиваемый текстовый ИИ‑помощник.\n\n" +
+                "Как со мной работать:\n" +
+                "1️⃣ Выбери, *каким* я должен быть — личность, юмор, формат ответов и фишки.\n" +
+                "2️⃣ Включи несколько опций (можно много сразу).\n" +
+                "3️⃣ Просто пиши свои вопросы и задачи — я отвечу в выбранном стиле.\n\n" +
+                "Каждый ответ стоит *" + promptPriceCredits + "* кредит.\n" +
+                "Стартовый подарок — 10 кредитов, а каждый день я докидываю бонус 🎁";
 
         SendMessage msg = SendMessage.builder()
                 .chatId(chatId)
@@ -248,14 +278,14 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         execute(msg);
     }
 
-    private void showNode(long chatId, int messageId, FilterNode node) throws TelegramApiException {
+    private void showNode(long chatId, int messageId, FilterNode node, UserSession session) throws TelegramApiException {
         if (node == null) return;
 
         if (node.getId().equals(FilterRegistry.ROOT_ID)) {
             EditMessageText edit = EditMessageText.builder()
                     .chatId(chatId)
                     .messageId(messageId)
-                    .text("👋 Главное меню. Выбирай категорию 👇")
+                    .text("⚙️ Главное меню настроек. Выбирай блок, который хочешь подкрутить 👇")
                     .replyMarkup(buildKeyboardForRoot())
                     .build();
             execute(edit);
@@ -263,41 +293,37 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         }
 
         if (node.isLeaf()) {
+            boolean active = session.getActiveOptionIds().contains(node.getId());
+            String status = active
+                    ? "🔘 Сейчас: *ВКЛЮЧЕНО*"
+                    : "⚪ Сейчас: *ВЫКЛЮЧЕНО*";
+
             String text = "🧩 *" + node.getTitle() + "*\n\n" +
                     node.getDescription() + "\n\n" +
-                    "Стоимость применения фильтра: *" + promptPriceCredits + "* кредит.";
+                    status + "\n\n" +
+                    "Эта настройка влияет на то, как я формулирую ответы.";
+
             EditMessageText edit = EditMessageText.builder()
                     .chatId(chatId)
                     .messageId(messageId)
                     .text(text)
                     .parseMode(ParseMode.MARKDOWN)
-                    .replyMarkup(buildKeyboardForLeaf(node))
+                    .replyMarkup(buildKeyboardForLeaf(node, session))
                     .build();
             execute(edit);
         } else {
-            String text = "Выбрано: *" + node.getTitle() + "*\n\n" +
-                    "Тыкни на один из фильтров ниже 👇";
+            String text = node.getTitle() + "\n\n" +
+                    "Выбирай конкретные опции ниже. Можно включать несколько — они суммируются.\n\n" +
+                    "Активные опции отмечены галочкой ✅.";
+
             EditMessageText edit = EditMessageText.builder()
                     .chatId(chatId)
                     .messageId(messageId)
                     .text(text)
-                    .parseMode(ParseMode.MARKDOWN)
-                    .replyMarkup(buildKeyboardForCategory(node))
+                    .replyMarkup(buildKeyboardForCategory(node, session))
                     .build();
             execute(edit);
         }
-    }
-
-    private void askForPhoto(long chatId, int messageId) throws TelegramApiException {
-        EditMessageText edit = EditMessageText.builder()
-                .chatId(chatId)
-                .messageId(messageId)
-                .text("📸 Пришлите *одно* фото для обработки.\n\n" +
-                        "Можно добавить подпись к фото — она допишет промпт (особенно полезно в режимах \"Текстовый запрос\").")
-                .parseMode(ParseMode.MARKDOWN)
-                .replyMarkup(buildBackOnlyKeyboard())
-                .build();
-        execute(edit);
     }
 
     private void showBalanceScreen(long chatId, int messageId) throws TelegramApiException {
@@ -305,7 +331,7 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
 
         String text = "💳 *Баланс / пополнить*\n\n" +
                 "Текущий баланс: *" + bal + "* кредитов.\n" +
-                "Одна генерация стоит *" + promptPriceCredits + "* кредит.\n\n" +
+                "Один ответ бота стоит *" + promptPriceCredits + "* кредит.\n\n" +
                 "Нажми «Пополнить», чтобы выбрать сумму пополнения.";
 
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
@@ -364,7 +390,7 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         return InlineKeyboardMarkup.builder().keyboard(rows).build();
     }
 
-    private InlineKeyboardMarkup buildKeyboardForCategory(FilterNode category) {
+    private InlineKeyboardMarkup buildKeyboardForCategory(FilterNode category, UserSession session) {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
         List<String> childIds = category.getChildrenIds();
@@ -373,9 +399,9 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
 
         for (int i = 0; i < children.size(); i += 2) {
             List<InlineKeyboardButton> row = new ArrayList<>();
-            row.add(buttonForNode(children.get(i)));
+            row.add(buttonForLeafInCategory(children.get(i), session));
             if (i + 1 < children.size()) {
-                row.add(buttonForNode(children.get(i + 1)));
+                row.add(buttonForLeafInCategory(children.get(i + 1), session));
             }
             rows.add(row);
         }
@@ -385,17 +411,19 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         return InlineKeyboardMarkup.builder().keyboard(rows).build();
     }
 
-    private InlineKeyboardMarkup buildKeyboardForLeaf(FilterNode leaf) {
+    private InlineKeyboardMarkup buildKeyboardForLeaf(FilterNode leaf, UserSession session) {
+        boolean active = session.getActiveOptionIds().contains(leaf.getId());
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
         rows.add(List.of(
                 InlineKeyboardButton.builder()
-                        .text("✅ Выбрать фильтр")
+                        .text(active ? "❌ Отключить настройку" : "✅ Включить настройку")
                         .callbackData("SELECT:" + leaf.getId())
                         .build()
         ));
         rows.add(List.of(
                 InlineKeyboardButton.builder()
-                        .text("🖼 Посмотреть пример")
+                        .text("📝 Пример запроса")
                         .callbackData("EXAMPLE:" + leaf.getId())
                         .build()
         ));
@@ -418,6 +446,15 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                 .build();
     }
 
+    private InlineKeyboardButton buttonForLeafInCategory(FilterNode leaf, UserSession session) {
+        boolean active = session.getActiveOptionIds().contains(leaf.getId());
+        String text = (active ? "✅ " : "") + leaf.getTitle();
+        return InlineKeyboardButton.builder()
+                .text(text)
+                .callbackData("NODE:" + leaf.getId())
+                .build();
+    }
+
     private InlineKeyboardButton backButton(String targetId) {
         return InlineKeyboardButton.builder()
                 .text("⬅️ Назад")
@@ -425,11 +462,9 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                 .build();
     }
 
-    // ===== GENERATION =====
+    // ===== AI‑ЗАПРОСЫ =====
 
-    private void handlePhotoGeneration(Message msg, UserSession session) throws Exception {
-        long chatId = msg.getChatId();
-
+    private void processUserQuery(long chatId, UserSession session, String userText) throws TelegramApiException {
         int balance = userService.getBalance(chatId);
         if (balance < promptPriceCredits) {
             execute(SendMessage.builder()
@@ -440,69 +475,62 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
             return;
         }
 
-        // самое большое фото
-        List<PhotoSize> photos = msg.getPhoto();
-        PhotoSize largest = photos.get(photos.size() - 1);
-        String fileId = largest.getFileId();
+        // Собираем активные настройки
+        Set<String> activeIds = session.getActiveOptionIds();
+        StringBuilder settingsNames = new StringBuilder();
+        StringBuilder settingsPrompt = new StringBuilder();
 
-        // получаем путь файла у Telegram и строим публичный URL
-        GetFile getFileMethod = new GetFile();
-        getFileMethod.setFileId(fileId);
-        org.telegram.telegrambots.meta.api.objects.File tgFile = execute(getFileMethod);
-        String filePath = tgFile.getFilePath();
-        String fileUrl = "https://api.telegram.org/file/bot" + getBotToken() + "/" + filePath;
+        if (activeIds.isEmpty()) {
+            settingsNames.append("по умолчанию");
+        } else {
+            for (String id : activeIds) {
+                FilterNode node = registry.getNode(id);
+                if (node == null || !node.isLeaf()) continue;
 
-        String caption = msg.getCaption() != null ? msg.getCaption() : "";
+                if (settingsNames.length() > 0) settingsNames.append(", ");
+                settingsNames.append(node.getTitle());
 
-        FilterNode filter = registry.getNode(session.getSelectedFilterId());
-        String prompt = buildPromptForFilter(filter, caption);
+                if (node.getPromptPart() != null && !node.getPromptPart().isBlank()) {
+                    settingsPrompt.append("- ").append(node.getPromptPart()).append("\n");
+                }
+            }
+        }
+
+        String modePrompt = settingsPrompt.length() > 0
+                ? settingsPrompt.toString()
+                : "";
 
         // списываем баланс заранее
-        userService.changeBalance(chatId, -promptPriceCredits, "SPEND", filter.getId());
+        userService.changeBalance(chatId, -promptPriceCredits, "SPEND",
+                activeIds.isEmpty() ? "default" : String.join(",", activeIds));
 
         try {
-            // теперь GeminiClient возвращает байты сгенерированного изображения
-            byte[] imageBytes = geminiClient.generateImage(prompt, fileUrl);
+            String reply = geminiClient.generateReply(modePrompt, userText);
 
-            SendPhoto sendPhoto = new SendPhoto();
-            sendPhoto.setChatId(String.valueOf(chatId));
-            sendPhoto.setCaption("✨ Готово! Фильтр: " + filter.getTitle());
+            StringBuilder out = new StringBuilder();
+            out.append("🧠 Активные настройки: ").append(settingsNames).append("\n\n");
+            out.append(reply);
 
-            // Отправляем как загруженный файл, а не как URL — Telegram больше никуда сам не ходит
-            InputFile photoFile = new InputFile(new ByteArrayInputStream(imageBytes), "avatar.png");
-            sendPhoto.setPhoto(photoFile);
-            sendPhoto.setReplyMarkup(buildBackOnlyKeyboard());
+            SendMessage resp = SendMessage.builder()
+                    .chatId(chatId)
+                    .text(out.toString())
+                    // без Markdown, чтобы не поймать спецсимволы из ответа
+                    .replyMarkup(buildBackOnlyKeyboard())
+                    .build();
 
-            execute(sendPhoto);
-        } catch (IOException | IllegalStateException | TelegramApiException ex) {
+            execute(resp);
+        } catch (IOException | IllegalStateException ex) {
             // откат кредита
             userService.changeBalance(chatId, promptPriceCredits, "REFUND", "gemini_error");
             try {
                 execute(SendMessage.builder()
                         .chatId(chatId)
-                        .text("⚙️ Не удалось получить картинку от нейросети: " + ex.getMessage() + "\n" +
+                        .text("⚙️ Не удалось получить ответ от нейросети: " + ex.getMessage() + "\n" +
                                 "Я вернул кредит на твой баланс.")
                         .build());
             } catch (TelegramApiException e2) {
                 e2.printStackTrace();
             }
         }
-    }
-
-        private String buildPromptForFilter(FilterNode filter, String userCaption) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Apply the following creative style to the user's portrait photo: ");
-        sb.append(filter.getPromptPart());
-
-        if (userCaption != null && !userCaption.isBlank()) {
-            sb.append(" Additionally, follow these extra user instructions (they may be in Russian): ");
-            sb.append(userCaption);
-        }
-
-        sb.append(" Preserve the person's identity and facial features, keep the result realistic enough for a social-media avatar, ");
-        sb.append("high-quality details, 4k, portrait orientation.");
-        sb.append(" When you finish, generate the final image and respond ONLY with a direct https URL to that image, without any extra text.");
-
-        return sb.toString();
     }
 }

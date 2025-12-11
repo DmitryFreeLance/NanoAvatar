@@ -8,9 +8,17 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import java.io.IOException;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
+/**
+ * Клиент для обращения к AI‑агенту Timeweb по OpenAI‑совместимому Chat Completions API.
+ * Работает ТОЛЬКО с текстом, без картинок.
+ *
+ * Эндпоинт:
+ *   POST {baseUrl}/api/v1/cloud-ai/agents/{agent_id}/v1/chat/completions
+ *
+ * Документация:
+ *   https://timeweb.cloud/docs/ai-agents/api-usage/openai-compatible-api
+ */
 public class GeminiClient {
 
     private static final MediaType JSON
@@ -25,39 +33,29 @@ public class GeminiClient {
     private final String model;
 
     /**
-     * Системный промпт, который отправляем в Chat Completions.
-     * Он должен быть согласован с тем, что ты написал в панели Timeweb
-     * (там можно оставить общий текст, а сюда — техзадание под бота).
+     * Базовый системный промпт для текстового ассистента.
+     * Детальные настройки стиля прилетают отдельным блоком modePrompt.
      */
     private static final String SYSTEM_PROMPT = String.join("\n",
-            "Ты — визуальный агент на базе Gemini 2.5 Flash для Telegram-бота NanoAvatar.",
+            "Ты — NanoBuddy, дружелюбный русскоязычный текстовый помощник для Telegram‑бота.",
             "",
-            "Пользователь присылает портретное фото (селфи, фото по пояс, портрет) и выбирает стиль оформления аватара.",
-            "Бэкенд передаёт тебе:",
-            "- URL исходного фото пользователя;",
-            "- текстовый промпт со стилем (фильтром).",
+            "К тебе обращаются с бытовыми, учебными и рабочими вопросами, черновиками текстов,",
+            "просьбами придумать идеи и расставить приоритеты.",
             "",
-            "Твоя задача:",
-            "1) На основе исходного фото создать новое изображение с сохранением узнаваемости человека.",
-            "2) Применить описанный стиль: одежда, фон, свет, художественные эффекты.",
-            "3) Сделать картинку аккуратной и реалистичной, пригодной для аватарки/соцсетей.",
+            "Общие правила:",
+            "- Отвечай на РУССКОМ, если пользователь явно не просит другое.",
+            "- Пиши понятно, структурировано, без лишней воды.",
+            "- Эмодзи можно использовать, но не перебарщивай.",
+            "- Не выдавай себя за врача, психотерапевта или юриста.",
+            "- Если вопрос про здоровье, психику или юридические риски — мягко советуй обратиться к специалисту.",
+            "- Не обещай генерацию картинок, видео, музыки — ты работаешь только с текстом.",
             "",
-            "Правила:",
-            "- Сохраняй черты лица и примерную фигуру пользователя, не превращай его в другого человека.",
-            "- Не меняй пол и возраст без явной просьбы.",
-            "- Улучшай свет, цвет, резкость и детали.",
-            "- Можно добавлять одежду, аксессуары и фон, если это соответствует промпту.",
-            "- Не создавай NSFW, жёсткое насилие, политику и прочий запрещённый контент.",
-            "",
-            "Формат ОТВЕТА:",
-            "- Сгенерируй конечное изображение.",
-            "- Верни ТОЛЬКО ОДНУ ПРЯМУЮ ССЫЛКУ (https://...) на готовое изображение JPG или PNG.",
-            "- БЕЗ какого-либо дополнительного текста, без комментариев, без Markdown, без JSON."
+            "Дополнительные настройки стиля (личность, формат, юмор и т.п.) будут переданы отдельным блоком.",
+            "Если такие инструкции есть — строго им следуй и не противоречь им."
     );
 
     public GeminiClient(String baseUrl, String agentId, String apiKey, String model) {
-        // Для OpenAI‑совместимого API в примерах используется https://agent.timeweb.cloud
-        // Мы ожидаем именно ДОМЕН, без хвоста /api/v1/...
+        // В доках для OpenAI‑совместимого API пример: https://agent.timeweb.cloud
         if (baseUrl == null || baseUrl.isBlank()) {
             this.baseUrl = "https://agent.timeweb.cloud";
         } else {
@@ -71,17 +69,13 @@ public class GeminiClient {
     }
 
     /**
-     * Один запрос к OpenAI‑совместимому Chat Completions:
-     * POST /api/v1/cloud-ai/agents/{agent_id}/v1/chat/completions
+     * Один текстовый запрос к агенту.
      *
-     * На вход:
-     *  - filterPrompt     — текст стиля/фильтра;
-     *  - sourceImageUrl   — публичный URL исходного фото (из Telegram).
-     *
-     * На выход:
-     *  - байты PNG/JPG сгенерированного изображения (для отправки в Telegram).
+     * @param modePrompt  — доп. инструкции под активные настройки (может быть null/пусто)
+     * @param userPrompt  — сообщение пользователя
+     * @return текст ответа ассистента
      */
-    public byte[] generateImage(String filterPrompt, String sourceImageUrl) throws IOException {
+    public String generateReply(String modePrompt, String userPrompt) throws IOException {
         if (agentId == null || agentId.isBlank()) {
             throw new IllegalStateException("TIMEWEB_AGENT_ID is not configured");
         }
@@ -89,41 +83,30 @@ public class GeminiClient {
             throw new IllegalStateException("GEMINI_API_KEY is not configured");
         }
 
-        // messages[]
         JsonArray messages = new JsonArray();
 
         // system
         JsonObject systemMsg = new JsonObject();
         systemMsg.addProperty("role", "system");
-        systemMsg.addProperty("content", SYSTEM_PROMPT);
+        StringBuilder sysContent = new StringBuilder(SYSTEM_PROMPT);
+        if (modePrompt != null && !modePrompt.isBlank()) {
+            sysContent.append("\n\nДополнительные настройки стиля и поведения:\n");
+            sysContent.append(modePrompt);
+        }
+        systemMsg.addProperty("content", sysContent.toString());
         messages.add(systemMsg);
 
         // user
         JsonObject userMsg = new JsonObject();
         userMsg.addProperty("role", "user");
-
-        StringBuilder userContent = new StringBuilder();
-        userContent
-                .append("Исходное портретное фото пользователя (URL): ")
-                .append(sourceImageUrl)
-                .append("\n\n")
-                .append("Применяй к этому фото следующий стиль/фильтр:\n")
-                .append(filterPrompt)
-                .append("\n\n")
-                .append("Сохрани лицо и фигуру узнаваемыми. ")
-                .append("Когда картинка будет готова, верни ТОЛЬКО прямой URL на итоговое изображение.");
-
-        userMsg.addProperty("content", userContent.toString());
+        userMsg.addProperty("content", userPrompt);
         messages.add(userMsg);
 
         JsonObject payload = new JsonObject();
-        // модель в OpenAI‑совместимом API у Timeweb можно не указывать — они берут из настроек агента,
-        // но если хочешь, оставим:
         if (model != null && !model.isBlank()) {
             payload.addProperty("model", model);
         }
         payload.add("messages", messages);
-        payload.addProperty("temperature", 0.9);
         payload.addProperty("stream", false);
 
         String url = baseUrl + "/api/v1/cloud-ai/agents/" + agentId + "/v1/chat/completions";
@@ -140,39 +123,15 @@ public class GeminiClient {
             String responseBody = response.body() != null ? response.body().string() : "";
 
             if (!response.isSuccessful()) {
-                // Это сообщение ты как раз видел раньше: Gemini API error: HTTP 400 Body: ...
                 throw new IOException("Gemini API error: HTTP " + response.code()
                         + " Body: " + responseBody);
             }
 
             String content = extractMessageContent(responseBody);
-            String imageUrl = extractFirstUrl(content);
-
-            if (imageUrl == null) {
-                throw new IOException("Gemini API response doesn't contain image URL. Content: " + content);
+            if (content == null) {
+                throw new IOException("Gemini API response doesn't contain message content");
             }
-
-            System.out.println("Gemini returned image URL: " + imageUrl); // лог на всякий случай
-
-            // ⚠️ ВАЖНО: теперь мы не отдаём этот URL в Telegram.
-            // Скачиваем картинку сами и возвращаем её байты.
-            Request downloadReq = new Request.Builder()
-                    .url(imageUrl)
-                    .get()
-                    .build();
-
-            try (Response downloadResp = client.newCall(downloadReq).execute()) {
-                if (downloadResp.body() == null || !downloadResp.isSuccessful()) {
-                    String errBody = downloadResp.body() != null ? downloadResp.body().string() : "";
-                    throw new IOException(
-                            "Failed to download image from URL: " + imageUrl +
-                                    ". HTTP " + downloadResp.code() +
-                                    " Body: " + errBody
-                    );
-                }
-
-                return downloadResp.body().bytes();
-            }
+            return content.trim();
         }
     }
 
@@ -219,17 +178,5 @@ public class GeminiClient {
         }
 
         return contentEl.toString();
-    }
-
-    private String extractFirstUrl(String text) {
-        if (text == null) return null;
-
-        // Ищем http/https до первого пробела, кавычек, скобок и т.п.
-        Pattern pattern = Pattern.compile("(https?://[^\\s\"'<>]+)");
-        Matcher matcher = pattern.matcher(text);
-        if (matcher.find()) {
-            return matcher.group(1);
-        }
-        return null;
     }
 }

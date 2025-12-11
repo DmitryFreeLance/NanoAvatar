@@ -3,11 +3,15 @@ package com.example.nanoavatar.filters;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Узел меню настроек.
+ * Используется и для корня, и для категорий, и для отдельных опций.
+ */
 public class FilterNode {
     private final String id;          // уникальный ID узла
     private final String title;       // текст кнопки (с эмодзи)
-    private final String description; // текст описания (для листа)
-    private final String promptPart;  // кусок промпта для Gemini
+    private final String description; // текст описания опции/категории
+    private final String promptPart;  // доп. инструкции для системного промпта
     private final String parentId;
     private final List<String> childrenIds = new ArrayList<>();
 

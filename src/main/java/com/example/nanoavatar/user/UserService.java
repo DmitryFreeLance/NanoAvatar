@@ -36,7 +36,7 @@ public class UserService {
             }
 
             try (PreparedStatement insert = conn.prepareStatement(
-                    "INSERT INTO users(chat_id, username, balance) VALUES(?, ?, 3)")) {
+                    "INSERT INTO users(chat_id, username, balance) VALUES(?, ?, 10)")) {
                 insert.setLong(1, chatId);
                 insert.setString(2, username);
                 insert.executeUpdate();

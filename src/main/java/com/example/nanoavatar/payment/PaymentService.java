@@ -30,8 +30,8 @@ public class PaymentService {
 
         return SendInvoice.builder()
                 .chatId(chatId)
-                .title("Пополнение баланса")
-                .description("Оплата доступа к нейро‑фильтрам NanoAvatar")
+                .title("Пополнение баланса NanoBuddy")
+                .description("Оплата доступа к текстовому ИИ‑помощнику NanoBuddy")
                 .payload("TOPUP_" + amountRub)
                 .providerToken(providerToken)
                 .currency("RUB")
