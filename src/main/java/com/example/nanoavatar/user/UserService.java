@@ -15,16 +15,37 @@ public class UserService {
         this.db = db;
     }
 
-    public void ensureUser(long chatId, String username) {
+    public boolean ensureUser(long chatId, String username) {
         try (Connection conn = db.getConnection()) {
             try (PreparedStatement ps = conn.prepareStatement(
-                    "INSERT OR IGNORE INTO users(chat_id, username) VALUES(?, ?)")) {
+                    "SELECT id FROM users WHERE chat_id = ?")) {
                 ps.setLong(1, chatId);
-                ps.setString(2, username);
-                ps.executeUpdate();
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        if (username != null) {
+                            try (PreparedStatement up = conn.prepareStatement(
+                                    "UPDATE users SET username = ? WHERE chat_id = ?")) {
+                                up.setString(1, username);
+                                up.setLong(2, chatId);
+                                up.executeUpdate();
+                            }
+                        }
+                        return false;
+                    }
+                }
             }
+
+            try (PreparedStatement insert = conn.prepareStatement(
+                    "INSERT INTO users(chat_id, username, balance) VALUES(?, ?, 3)")) {
+                insert.setLong(1, chatId);
+                insert.setString(2, username);
+                insert.executeUpdate();
+            }
+
+            return true;
         } catch (SQLException e) {
             e.printStackTrace();
+            return false;
         }
     }
 
