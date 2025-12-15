@@ -23,7 +23,7 @@ public class Database {
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     chat_id INTEGER UNIQUE NOT NULL,
                     username TEXT,
-                    balance INTEGER NOT NULL DEFAULT 10,
+                    balance INTEGER NOT NULL DEFAULT 15,
                     last_bonus_date TEXT
                 );
             """);

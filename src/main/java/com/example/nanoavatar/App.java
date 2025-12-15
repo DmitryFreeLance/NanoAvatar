@@ -30,10 +30,13 @@ public class App {
         int minTopup = Integer.parseInt(envOrDotenv(dotenv, "MIN_TOPUP_RUB", "100"));
         int creditsPerRub = Integer.parseInt(envOrDotenv(dotenv, "CREDITS_PER_RUBLE", "1"));
         int promptPrice = Integer.parseInt(envOrDotenv(dotenv, "PROMPT_PRICE_CREDITS", "1"));
-        int dailyBonus = Integer.parseInt(envOrDotenv(dotenv, "DAILY_BONUS_CREDITS", "5"));
+
+        // ✅ Жёстко 5 кредитов в день
+        int dailyBonus = 5;
+
         String moscowZoneId = envOrDotenv(dotenv, "MOSCOW_TIMEZONE", "Europe/Moscow");
 
-        // Timeweb AI‑агент (OpenAI‑совместимый API)
+        // Timeweb AI-агент (OpenAI-совместимый API)
         String timewebBaseUrl = envOrDotenv(dotenv, "TIMEWEB_BASE_URL", "https://agent.timeweb.cloud");
         String timewebAgentId = requireEnv(dotenv, "TIMEWEB_AGENT_ID");
         String geminiApiKey = requireEnv(dotenv, "GEMINI_API_KEY");

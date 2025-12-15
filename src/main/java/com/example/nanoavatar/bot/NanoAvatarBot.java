@@ -315,7 +315,6 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                     .build();
             execute(edit);
 
-            // ===== НОВОЕ: ПРЕСЕТЫ =====
         } else if (data.startsWith("PRESET:")) {
             String key = data.substring("PRESET:".length()).trim();
             Preset preset = PRESETS.get(key);
@@ -334,7 +333,6 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                                 "⚙️ Главное меню настроек. Выбирай блок, который хочешь подкрутить 👇");
             }
 
-            // ===== НОВОЕ: ВКЛ/ВЫКЛ ВСЕ В КАТЕГОРИИ =====
         } else if (data.startsWith("BULK_ON:")) {
             String catId = data.substring("BULK_ON:".length());
             FilterNode cat = registry.getNode(catId);
@@ -361,7 +359,6 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                 showNode(chatId, msgId, cat, session);
             }
 
-            // ===== НОВОЕ: СБРОС ВСЕХ НАСТРОЕК =====
         } else if ("CLEAR_ALL".equals(data)) {
             session.getActiveOptionIds().clear();
             session.setCurrentNodeId(FilterRegistry.ROOT_ID);
@@ -374,7 +371,6 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
     }
 
     private void applyPreset(UserSession session, Preset preset) {
-        // пресет = заменить текущие настройки целиком
         session.getActiveOptionIds().clear();
 
         for (String id : preset.optionIds) {
@@ -405,7 +401,7 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                 "2️⃣ Включи несколько опций (можно много сразу).\n" +
                 "3️⃣ Просто пиши свои вопросы и задачи — я отвечу в выбранном стиле.\n\n" +
                 "Каждый ответ стоит *" + promptPriceCredits + "* кредит.\n" +
-                "Стартовый подарок — 10 кредитов, а каждый день я докидываю бонус 🎁";
+                "Стартовый подарок — 15 кредитов, а каждый день я докидываю бонус 🎁";
 
         SendMessage msg = SendMessage.builder()
                 .chatId(chatId)
@@ -507,7 +503,6 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
     private InlineKeyboardMarkup buildKeyboardForRoot() {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
-        // ===== ПРЕСЕТЫ (2x2) =====
         rows.add(List.of(
                 InlineKeyboardButton.builder().text("🧑‍💼 Работа").callbackData("PRESET:WORK").build(),
                 InlineKeyboardButton.builder().text("📚 Учёба").callbackData("PRESET:STUDY").build()
@@ -517,7 +512,6 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                 InlineKeyboardButton.builder().text("🎨 Креатив").callbackData("PRESET:CREATIVE").build()
         ));
 
-        // ===== КАТЕГОРИИ =====
         List<FilterNode> categories = new ArrayList<>();
         for (FilterNode node : registry.getAllNodes()) {
             if (FilterRegistry.ROOT_ID.equals(node.getParentId())) {
@@ -534,7 +528,6 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
             rows.add(row);
         }
 
-        // строка Баланс / пополнить
         rows.add(List.of(
                 InlineKeyboardButton.builder()
                         .text("💳 Баланс / пополнить")
@@ -542,7 +535,6 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                         .build()
         ));
 
-        // сброс настроек
         rows.add(List.of(
                 InlineKeyboardButton.builder()
                         .text("🧹 Сбросить настройки")
@@ -569,7 +561,6 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
             rows.add(row);
         }
 
-        // массовое вкл/выкл по категории
         rows.add(List.of(
                 InlineKeyboardButton.builder()
                         .text("✅ Включить всё")
@@ -650,30 +641,20 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
             return;
         }
 
-        // Собираем активные настройки
+        // ✅ Собираем только promptPart (без вывода активных настроек пользователю)
         Set<String> activeIds = session.getActiveOptionIds();
-        StringBuilder settingsNames = new StringBuilder();
         StringBuilder settingsPrompt = new StringBuilder();
 
-        if (activeIds.isEmpty()) {
-            settingsNames.append("по умолчанию");
-        } else {
-            for (String id : activeIds) {
-                FilterNode node = registry.getNode(id);
-                if (node == null || !node.isLeaf()) continue;
+        for (String id : activeIds) {
+            FilterNode node = registry.getNode(id);
+            if (node == null || !node.isLeaf()) continue;
 
-                if (settingsNames.length() > 0) settingsNames.append(", ");
-                settingsNames.append(node.getTitle());
-
-                if (node.getPromptPart() != null && !node.getPromptPart().isBlank()) {
-                    settingsPrompt.append("- ").append(node.getPromptPart()).append("\n");
-                }
+            if (node.getPromptPart() != null && !node.getPromptPart().isBlank()) {
+                settingsPrompt.append("- ").append(node.getPromptPart()).append("\n");
             }
         }
 
-        String modePrompt = settingsPrompt.length() > 0
-                ? settingsPrompt.toString()
-                : "";
+        String modePrompt = settingsPrompt.length() > 0 ? settingsPrompt.toString() : "";
 
         // списываем баланс заранее
         userService.changeBalance(chatId, -promptPriceCredits, "SPEND",
@@ -682,14 +663,10 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         try {
             String reply = geminiClient.generateReply(modePrompt, userText);
 
-            StringBuilder out = new StringBuilder();
-            out.append("🧠 Активные настройки: ").append(settingsNames).append("\n\n");
-            out.append(reply);
-
+            // ✅ Убрали строку "🧠 Активные настройки: ..."
             SendMessage resp = SendMessage.builder()
                     .chatId(chatId)
-                    .text(out.toString())
-                    // без Markdown, чтобы не поймать спецсимволы из ответа
+                    .text(reply)
                     .replyMarkup(buildBackOnlyKeyboard())
                     .build();
 

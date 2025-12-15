@@ -11,6 +11,9 @@ public class UserService {
 
     private final Database db;
 
+    // ✅ Стартовый баланс
+    private static final int INITIAL_BALANCE = 15;
+
     public UserService(Database db) {
         this.db = db;
     }
@@ -35,10 +38,12 @@ public class UserService {
                 }
             }
 
+            // ✅ Было 10, стало 15
             try (PreparedStatement insert = conn.prepareStatement(
-                    "INSERT INTO users(chat_id, username, balance) VALUES(?, ?, 10)")) {
+                    "INSERT INTO users(chat_id, username, balance) VALUES(?, ?, ?)")) {
                 insert.setLong(1, chatId);
                 insert.setString(2, username);
+                insert.setInt(3, INITIAL_BALANCE);
                 insert.executeUpdate();
             }
 
