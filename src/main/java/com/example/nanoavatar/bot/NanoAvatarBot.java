@@ -33,6 +33,72 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
 
     private final Map<Long, UserSession> sessions = new HashMap<>();
 
+    // ===== PRESETS =====
+    private static class Preset {
+        final String title;
+        final LinkedHashSet<String> optionIds;
+
+        Preset(String title, String... ids) {
+            this.title = title;
+            this.optionIds = new LinkedHashSet<>(Arrays.asList(ids));
+        }
+    }
+
+    private static final Map<String, Preset> PRESETS = new LinkedHashMap<>();
+    static {
+        PRESETS.put("WORK", new Preset("🧑‍💼 Рабочий режим",
+                "pers_formal",
+                "emo_no_emoji",
+                "fmt_bullets",
+                "tool_summary_actions",
+                "tool_checklist",
+                "work_email",
+                "work_meeting",
+                "work_tasks",
+                "work_priorities",
+                "acc_no_guess",
+                "acc_assumptions"
+        ));
+
+        PRESETS.put("STUDY", new Preset("📚 Учёба",
+                "pers_mentor",
+                "fmt_steps",
+                "learn_teacher",
+                "learn_analogy",
+                "learn_questions",
+                "tool_checklist",
+                "tool_first_steps",
+                "int_clarify"
+        ));
+
+        PRESETS.put("ACCURACY", new Preset("🛡 Максимальная точность",
+                "pers_formal",
+                "emo_serious",
+                "fmt_steps",
+                "fmt_bullets",
+                "tool_summary_actions",
+                "acc_no_guess",
+                "acc_assumptions",
+                "acc_check_numbers",
+                "acc_confidence",
+                "acc_risk_notice",
+                "acc_privacy"
+        ));
+
+        PRESETS.put("CREATIVE", new Preset("🎨 Креатив",
+                "pers_friend",
+                "emo_fun",
+                "fmt_deep",
+                "text_titles",
+                "text_copy",
+                "weird_format",
+                "weird_nerd",
+                "role_storyteller",
+                "game_rpg",
+                "vibe_chill"
+        ));
+    }
+
     public NanoAvatarBot(String token,
                          String botUsername,
                          Database db,
@@ -162,7 +228,7 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
     }
 
     private void sendHelp(long chatId) throws TelegramApiException {
-        String text = "🤖 *NanoBuddy* — настраиваемый текстовый ИИ‑ассистент.\n\n" +
+        String text = "🤖 *NanoBuddy* — настраиваемый текстовый ИИ-ассистент.\n\n" +
                 "Что он умеет:\n" +
                 "• ✏️ Переписывать тексты красиво и без ошибок\n" +
                 "• 📅 Помогать планировать день и разбирать задачи\n" +
@@ -210,16 +276,19 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
             session.setCurrentNodeId(nodeId);
             session.setState(SessionState.BROWSING);
             showNode(chatId, msgId, registry.getNode(nodeId), session);
+
         } else if (data.startsWith("BACK:")) {
             String nodeId = data.substring("BACK:".length());
             session.setCurrentNodeId(nodeId);
             session.setState(SessionState.BROWSING);
             showNode(chatId, msgId, registry.getNode(nodeId), session);
+
         } else if (data.startsWith("SELECT:")) {
             String id = data.substring("SELECT:".length());
             toggleOption(session, id);
             FilterNode node = registry.getNode(id);
             showNode(chatId, msgId, node, session);
+
         } else if (data.startsWith("EXAMPLE:")) {
             String id = data.substring("EXAMPLE:".length());
             FilterNode node = registry.getNode(id);
@@ -229,9 +298,11 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                             "Например: \"Сделай план на день с учётом моих задач, " +
                             "используя выбранные мной настройки стиля\".")
                     .build());
+
         } else if ("BALANCE".equals(data)) {
             session.setState(SessionState.BROWSING);
             showBalanceScreen(chatId, msgId);
+
         } else if ("TOPUP".equals(data)) {
             session.setState(SessionState.WAITING_FOR_TOPUP_AMOUNT);
             EditMessageText edit = EditMessageText.builder()
@@ -243,6 +314,74 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                             .build())
                     .build();
             execute(edit);
+
+            // ===== НОВОЕ: ПРЕСЕТЫ =====
+        } else if (data.startsWith("PRESET:")) {
+            String key = data.substring("PRESET:".length()).trim();
+            Preset preset = PRESETS.get(key);
+
+            if (preset != null) {
+                applyPreset(session, preset);
+                session.setCurrentNodeId(FilterRegistry.ROOT_ID);
+                session.setState(SessionState.BROWSING);
+
+                showRootMenu(chatId, msgId,
+                        "✅ Пресет применён: " + preset.title + "\n\n" +
+                                "⚙️ Главное меню настроек. Выбирай блок, который хочешь подкрутить 👇");
+            } else {
+                showRootMenu(chatId, msgId,
+                        "⚠️ Неизвестный пресет.\n\n" +
+                                "⚙️ Главное меню настроек. Выбирай блок, который хочешь подкрутить 👇");
+            }
+
+            // ===== НОВОЕ: ВКЛ/ВЫКЛ ВСЕ В КАТЕГОРИИ =====
+        } else if (data.startsWith("BULK_ON:")) {
+            String catId = data.substring("BULK_ON:".length());
+            FilterNode cat = registry.getNode(catId);
+            if (cat != null) {
+                for (String childId : cat.getChildrenIds()) {
+                    FilterNode child = registry.getNode(childId);
+                    if (child != null && child.isLeaf()) {
+                        session.getActiveOptionIds().add(childId);
+                    }
+                }
+                showNode(chatId, msgId, cat, session);
+            }
+
+        } else if (data.startsWith("BULK_OFF:")) {
+            String catId = data.substring("BULK_OFF:".length());
+            FilterNode cat = registry.getNode(catId);
+            if (cat != null) {
+                for (String childId : cat.getChildrenIds()) {
+                    FilterNode child = registry.getNode(childId);
+                    if (child != null && child.isLeaf()) {
+                        session.getActiveOptionIds().remove(childId);
+                    }
+                }
+                showNode(chatId, msgId, cat, session);
+            }
+
+            // ===== НОВОЕ: СБРОС ВСЕХ НАСТРОЕК =====
+        } else if ("CLEAR_ALL".equals(data)) {
+            session.getActiveOptionIds().clear();
+            session.setCurrentNodeId(FilterRegistry.ROOT_ID);
+            session.setState(SessionState.BROWSING);
+
+            showRootMenu(chatId, msgId,
+                    "🧹 Настройки сброшены.\n\n" +
+                            "⚙️ Главное меню настроек. Выбирай блок, который хочешь подкрутить 👇");
+        }
+    }
+
+    private void applyPreset(UserSession session, Preset preset) {
+        // пресет = заменить текущие настройки целиком
+        session.getActiveOptionIds().clear();
+
+        for (String id : preset.optionIds) {
+            FilterNode node = registry.getNode(id);
+            if (node != null && node.isLeaf()) {
+                session.getActiveOptionIds().add(id);
+            }
         }
     }
 
@@ -260,7 +399,7 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
     private void sendMainMenu(long chatId, UserSession session) throws TelegramApiException {
         InlineKeyboardMarkup kb = buildKeyboardForRoot();
 
-        String text = "👋 Привет! Я *NanoBuddy* — настраиваемый текстовый ИИ‑помощник.\n\n" +
+        String text = "👋 Привет! Я *NanoBuddy* — настраиваемый текстовый ИИ-помощник.\n\n" +
                 "Как со мной работать:\n" +
                 "1️⃣ Выбери, *каким* я должен быть — личность, юмор, формат ответов и фишки.\n" +
                 "2️⃣ Включи несколько опций (можно много сразу).\n" +
@@ -278,17 +417,22 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
         execute(msg);
     }
 
+    private void showRootMenu(long chatId, int messageId, String text) throws TelegramApiException {
+        EditMessageText edit = EditMessageText.builder()
+                .chatId(chatId)
+                .messageId(messageId)
+                .text(text)
+                .replyMarkup(buildKeyboardForRoot())
+                .build();
+        execute(edit);
+    }
+
     private void showNode(long chatId, int messageId, FilterNode node, UserSession session) throws TelegramApiException {
         if (node == null) return;
 
         if (node.getId().equals(FilterRegistry.ROOT_ID)) {
-            EditMessageText edit = EditMessageText.builder()
-                    .chatId(chatId)
-                    .messageId(messageId)
-                    .text("⚙️ Главное меню настроек. Выбирай блок, который хочешь подкрутить 👇")
-                    .replyMarkup(buildKeyboardForRoot())
-                    .build();
-            execute(edit);
+            showRootMenu(chatId, messageId,
+                    "⚙️ Главное меню настроек. Выбирай блок, который хочешь подкрутить 👇");
             return;
         }
 
@@ -363,6 +507,17 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
     private InlineKeyboardMarkup buildKeyboardForRoot() {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
+        // ===== ПРЕСЕТЫ (2x2) =====
+        rows.add(List.of(
+                InlineKeyboardButton.builder().text("🧑‍💼 Работа").callbackData("PRESET:WORK").build(),
+                InlineKeyboardButton.builder().text("📚 Учёба").callbackData("PRESET:STUDY").build()
+        ));
+        rows.add(List.of(
+                InlineKeyboardButton.builder().text("🛡 Точность").callbackData("PRESET:ACCURACY").build(),
+                InlineKeyboardButton.builder().text("🎨 Креатив").callbackData("PRESET:CREATIVE").build()
+        ));
+
+        // ===== КАТЕГОРИИ =====
         List<FilterNode> categories = new ArrayList<>();
         for (FilterNode node : registry.getAllNodes()) {
             if (FilterRegistry.ROOT_ID.equals(node.getParentId())) {
@@ -387,6 +542,14 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                         .build()
         ));
 
+        // сброс настроек
+        rows.add(List.of(
+                InlineKeyboardButton.builder()
+                        .text("🧹 Сбросить настройки")
+                        .callbackData("CLEAR_ALL")
+                        .build()
+        ));
+
         return InlineKeyboardMarkup.builder().keyboard(rows).build();
     }
 
@@ -405,6 +568,18 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
             }
             rows.add(row);
         }
+
+        // массовое вкл/выкл по категории
+        rows.add(List.of(
+                InlineKeyboardButton.builder()
+                        .text("✅ Включить всё")
+                        .callbackData("BULK_ON:" + category.getId())
+                        .build(),
+                InlineKeyboardButton.builder()
+                        .text("❌ Выключить всё")
+                        .callbackData("BULK_OFF:" + category.getId())
+                        .build()
+        ));
 
         rows.add(List.of(backButton(FilterRegistry.ROOT_ID)));
 
@@ -462,7 +637,7 @@ public class NanoAvatarBot extends TelegramLongPollingBot {
                 .build();
     }
 
-    // ===== AI‑ЗАПРОСЫ =====
+    // ===== AI-ЗАПРОСЫ =====
 
     private void processUserQuery(long chatId, UserSession session, String userText) throws TelegramApiException {
         int balance = userService.getBalance(chatId);
